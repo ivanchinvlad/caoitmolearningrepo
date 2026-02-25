@@ -1,0 +1,272 @@
+INSERT INTO "ShareDetails".shareprices
+(shareid, price, pricedate)
+VALUES
+	(1, 2.155, '2023-08-01 10:10:00'),
+	(1, 2.2125, '2023-08-01 10:12:00'),
+	(1, 2.4175, '2023-08-01 10:16:00'),
+	(1, 2.21, '2023-08-01 11:22:00'),
+	(1, 2.17, '2023-08-01 14:54:00'),
+	(1, 2.34125, '2023-08-01 16:10:00'),
+	(1, 41.10, '2023-08-01 10:10:00'),
+	(1, 43.22, '2023-08-01 10:10:00'),
+	(1, 45.20, '2023-08-01 10:10:00');
+
+INSERT INTO "ShareDetails".shares
+(sharedesc, sharetickerid, currentprice)
+VALUES ('FAT-BELLY.COM', 'FBC', 45.2000);
+
+SELECT * FROM "ShareDetails".shares;
+
+CREATE VIEW "CustomerDetails".v_custtrans
+AS
+SELECT
+	c.accountnumber,
+	c.customerfirstname,
+	c.customerotherinitials,
+	tt.transactiondescription,
+	t.dateentered,
+	t.amount,
+	t.referencedetails
+FROM "CustomerDetails".customers AS c
+JOIN "TransactionDetails".transactions AS t
+	ON t.customerid = c.customerid
+JOIN "TransactionDetails".transactiontypes AS tt
+	ON tt.transactiontypesid = t.transactiontype
+ORDER BY c.accountnumber ASC, t.dateentered DESC;
+
+INSERT INTO "CustomerDetails".financialproducts
+(productid, productname)
+VALUES 
+	(1, 'Regular Savings'),
+	(2, 'Bonds Account'),
+	(3, 'Share Account'),
+	(4, 'Life Insurance');
+
+INSERT INTO "CustomerDetails".customerproducts
+(customerid, financialproductid, amounttocollect,
+frequency, lastcollected, lastcollection, renewable)
+VALUES
+(1, 1, 200, 1, '31.08.2021', '31.08.2035', false),
+(1, 2, 50, 1, '24.08.2023', '24 March 2025', false),
+(2, 4, 150, 3, '20.08.2023', '20.08.2025', true),
+(3, 3, 500, 0, '24.08.2023', '24.08.2025', true);
+
+DROP VIEW IF EXISTS "CustomerDetails".v_custfinproducts;
+
+CREATE VIEW "CustomerDetails".v_custfinproducts
+AS SELECT
+c.customerfirstname || ' ' || c.customerlastname as customername,
+c.accountnumber, fp.productname, cp.amounttocollect,
+cp.frequency, cp.lastcollected
+FROM "CustomerDetails".customers AS c
+JOIN "CustomerDetails".customerproducts AS cp
+	ON cp.customerid = c.customerid
+JOIN "CustomerDetails".financialproducts AS fp
+	ON fp.productid = cp.financialproductid;
+	
+SELECT * FROM "CustomerDetails".v_custfinproducts;
+
+ALTER TABLE "CustomerDetails".customers
+ALTER COLUMN CustomerFirstName TYPE varchar(100);
+
+DROP VIEW IF EXISTS "CustomerDetails".v_custfinproducts;
+
+CREATE MATERIALIZED VIEW "CustomerDetails".v_custfinproducts
+AS SELECT
+c.customerfirstname || ' ' || c.customerlastname as customername,
+c.accountnumber, fp.productname, cp.amounttocollect,
+cp.frequency, cp.lastcollected
+FROM "CustomerDetails".customers AS c
+JOIN "CustomerDetails".customerproducts AS cp
+	ON cp.customerid = c.customerid
+JOIN "CustomerDetails".financialproducts AS fp
+	ON fp.productid = cp.financialproductid;
+	
+UPDATE "CustomerDetails".customers
+SET customerlastname = 'Brusten'
+WHERE customerlastname = 'Brust';
+
+SELECT * FROM "CustomerDetails".v_custfinproducts;
+
+REFRESH MATERIALIZED VIEW "CustomerDetails".v_custfinproducts;
+SELECT * FROM "CustomerDetails".v_custfinproducts;
+
+CREATE OR REPLACE FUNCTION "TransactionDetails".fn_intcalc(
+	Amount decimal(18,5),
+	FromDate date,
+	ToDate date,
+	InterestRate decimal(6,3)=10)
+RETURNS decimal(18,5)
+SECURITY INVOKER
+AS $$
+	DECLARE
+		IntCalculated decimal(18,5);
+
+	BEGIN
+		IntCalculated := Amount * (InterestRate / 100.00) *
+			(EXTRACT(DAY FROM ToDate::timestamp-FromDate::timestamp)/365.00);
+		RETURN COALESCE(IntCalculated,0);
+	END;
+$$ LANGUAGE plpgsql;
+
+SELECT "TransactionDetails".fn_intcalc (2000, '2023-03-01', '2023-03-10', 10);
+
+CREATE OR REPLACE FUNCTION "TransactionDetails".fn_returntransactions (
+	CustID bigint)
+RETURNS TABLE (
+	transactionid bigint,
+	customerid bigint,
+	transactiondescription varchar(30),
+	dateentered timestamp(0),
+	amount money)
+SECURITY INVOKER
+AS $$
+SELECT
+	t.transactionid as transactionid,
+	t.customerid as customerid,
+	tt.transactiondescription as transactiondescription,
+	t.dateentered as dateentered,
+	t.amount as amount
+FROM "TransactionDetails".transactions t
+JOIN "TransactionDetails".transactiontypes tt
+	ON tt.transactiontypesid = t.transactiontype
+WHERE t.customerid = CustID;
+$$ LANGUAGE sql;
+
+INSERT INTO "TransactionDetails".transactions
+	(customerid, transactiontype, dateentered, amount,
+	relatedproductid)
+VALUES
+	(1, 1, '2023-08-01', 100.00, 1),
+	(1, 1, '2023-08-03', 75.67, 1),
+	(1, 2, '2023-08-05', 35.20, 1),
+	(1, 2, '2023-08-06', 20.00, 1);
+
+INSERT INTO "TransactionDetails".Transactiontypes
+	(transactiondescription, credittype, affectcashbalance)
+VALUES
+	( 'proc+', true, true),
+	( 'proc-', false, true)
+	
+SELECT * FROM "TransactionDetails".fn_returntransactions(1);
+
+SELECT
+	c.customerfirstname,
+	c.customerlastname,
+	trans.transactionid,
+	trans.transactiondescription,
+	trans.dateentered,
+	trans.amount
+FROM "CustomerDetails".customers AS c
+JOIN "TransactionDetails".fn_returntransactions (c.customerid) AS trans
+	on c.customerid = trans.customerId;
+	
+
+CREATE PROCEDURE "CustomerDetails".spu_inscustomer (
+	FirstName varchar(50),
+	LastName varchar(50),
+	CustTitle int,
+	CustInitials varchar(10),
+	AddressId int,
+	AccountNumber varchar(15),
+	AccountTypeId int
+)
+LANGUAGE plpgsql
+AS $$
+BEGIN
+	INSERT INTO	"CustomerDetails".customers (
+		customertitleid,
+		customerfirstname,
+		customerotherinitials,
+		customerlastname,
+		addressid,
+		accountnumber,
+		accounttypeid,
+		clearebalance,
+		unclearebalance)
+	VALUES (
+		custtitle,
+		firstname,
+		custinitials,
+		lastname,
+		addressid,
+		accountnumber,
+		accounttypeid,
+		0,
+		0);
+END;
+$$
+
+CALL "CustomerDetails".spu_inscustomer ('Henry', 'Williams', 1, NULL, 431, '22067531', 1);
+
+CALL "CustomerDetails".spu_inscustomer(
+	custtitle => 1,
+	firstname => 'Julie',
+	custinitials => 'A',
+	lastname => 'Dewson',
+	addressid => 643,
+	accountnumber => 'SS865',
+	accounttypeid => 7);
+	
+CREATE OR REPLACE FUNCTION "CustomerDetails".fn_instransactions()
+RETURNS TRIGGER
+AS $$
+BEGIN
+	UPDATE "CustomerDetails".customers
+	SET clearebalance = clearebalance + (
+		SELECT
+			CASE
+				WHEN tt.credittype = false THEN (i.amount * -1)::money
+				ELSE (i.amount)::money
+			END
+		FROM NEW AS i
+		JOIN "TransactionDetails".transactiontypes AS tt
+			ON tt.transactiontypesid = i.transactiontype
+		WHERE tt.affectcashbalance = true )
+	WHERE customerid = NEW.customerid;
+	RETURN NULL;
+END;
+$$
+LANGUAGE plpgsql;
+
+CREATE OR REPLACE TRIGGER tg_instransactions
+	AFTER INSERT ON "TransactionDetails".transactions
+	REFERENCING NEW TABLE AS NEW
+	FOR EACH ROW EXECUTE FUNCTION "CustomerDetails".fn_instransactions();
+	
+SELECT clearebalance FROM "CustomerDetails".customers WHERE customerid=1;
+
+INSERT INTO "TransactionDetails".transactions
+(customerid, transactiontype, amount, relatedproductid, dateentered)
+VALUES (1, 2, 200, 1, current_date);
+
+INSERT INTO "TransactionDetails".transactions
+(customerid, transactiontype, amount, relatedproductid, dateentered)
+VALUES (1, 3, 200, 1, current_date);
+
+CREATE OR REPLACE FUNCTION "CustomerDetails".fn_instransactions()
+RETURNS TRIGGER
+AS $$
+BEGIN
+	UPDATE "CustomerDetails".customers
+	SET clearebalance = clearebalance + COALESCE((
+		SELECT
+			CASE
+				WHEN tt.credittype = false THEN (i.amount * -1)::money
+				ELSE (i.amount)::money
+			END
+		FROM NEW AS i
+		JOIN "TransactionDetails".transactiontypes AS tt
+			ON tt.transactiontypesid = i.transactiontype
+		WHERE tt.affectcashbalance = true ),0::money)
+	WHERE customerid = NEW.customerid;
+	RETURN NULL;
+END;
+$$
+LANGUAGE plpgsql;
+
+SELECT clearebalance FROM "CustomerDetails".customers WHERE customerid=1;
+
+INSERT INTO "TransactionDetails".transactions
+(customerid, transactiontype, amount, relatedproductid, dateentered)
+VALUES (1, 3, 200, 1, current_date);
